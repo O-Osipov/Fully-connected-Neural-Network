@@ -1,3 +1,7 @@
+/**
+ * @file neuralnetwork.c
+ * @brief Реализация функций для работы с полносвязной нейронной сетью
+*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +14,7 @@
 #include "dataset_io.h"
 #include "neuralnetwork.h"
 
+// вспомогательная функция для вывода массива
 void print_vector(const double *vec, size_t len) {
     printf("[");
     if (len <= 6) {
@@ -28,6 +33,7 @@ void print_vector(const double *vec, size_t len) {
     printf(" ]");
 }
 
+// вспомогательная функция для выводу внутренней структуры сети (веса и смещения по слоям)
 void NN_PrintWeightsAndBiases(const NeuralNetwork *net) {
     for (size_t l = 0; l < net->num_layer; l++) {
         size_t in_size = net->layer_size[l];
@@ -55,12 +61,21 @@ void NN_PrintWeightsAndBiases(const NeuralNetwork *net) {
     }
 }
 
+/**
+ * @brief Функция генерации случайных чисел Xavier
+ * @param input_size размер входного слоя нейронов
+ * @param output_size размер выходного слоя нейронов
+ */
 double NN_Random (size_t input_size, size_t output_size){
     //Xavier initialization
     double limit = sqrt(6.0 / (input_size + output_size));
     return ((double)rand() / RAND_MAX) * 2 * limit - limit;
 }
 
+/**
+ * @brief Функция генерации случайных чисел He
+ * @param input_size размер входного слоя нейронов
+ */
 double NN_HeRandom(size_t input_size) {
     double stddev = sqrt(2.0 / input_size);
     double u, v, s;
@@ -71,10 +86,18 @@ double NN_HeRandom(size_t input_size) {
         s = u * u + v * v;
     } while (s >= 1.0 || s == 0.0);
 
-    double z = u * sqrt(-2.0 * log(s) / s); // Box-Muller transform
+    double z = u * sqrt(-2.0 * log(s) / s);
     return z * stddev;
 }
 
+/**
+ * @brief Инициализация структуры NeuralNetwork, генерация случайных весов
+ * @param num_layer количество слоев сети
+ * @param layer_size массив размеров нейронов на каждом слое
+ * @details Выделяеться память под поля структуры NeuralNetwork
+ *          Весы инициализируються функцией NN_HeRandom
+ *          Смещения устанавливаються в 0
+ */
 NeuralNetwork* NN_Init (size_t num_layer, const size_t *layer_size){
     if (num_layer==0) {
         fprintf(stderr, "Error \"NN_Init\": num_layer mustn't be zero\n");
@@ -144,15 +167,20 @@ NeuralNetwork* NN_Init (size_t num_layer, const size_t *layer_size){
     return net;
 }
 
+/**
+ * @brief Функция активации нейрона ReLU
+ * @param neural значение нейрона
+ */
 double NN_Activation_Relu (double neural){
     //return (1)/(1+exp(neural*(-1)));
     return (neural > 0) ? neural : 0;
 }
 
-double NN_Activations_Relu_Dev (double x){
-    return NN_Activation_Relu(x)*(1-NN_Activation_Relu(x));
-}
-
+/**
+ * @brief Функция активации слоя нейронов softmax
+ * @param output масив значений нейронов слоя
+ * @param size размер массива (слоя)
+ */
 int NN_Activation_Softmax(double *output, size_t size) {
     if (!output || size == 0) return 1;
 
@@ -180,6 +208,15 @@ int NN_Activation_Softmax(double *output, size_t size) {
     return 0; // успех
 }
 
+/**
+ * @brief Алгоритм прямого распростронения нейронной сети
+ * @param data вектор входное слоя
+ * @param net структура нейронной сети
+ * @details Выполняеться матричное умножение входного слоя на веса
+ *          И прибавляеться вектор смещения
+ *          в многойслойной сети резулят матричных операций переходит на внутренние слои
+ *          для ускорения матричных вычеслений используеться функции cblas
+ */
 double** NN_ForwardPropagationsWithActivations(const uint8_t *data, const NeuralNetwork *net){
     if (!data || !net) return NULL;
 
@@ -215,14 +252,6 @@ double** NN_ForwardPropagationsWithActivations(const uint8_t *data, const Neural
             return NULL;
         }
 
-        // dgemv(CblasRowMajor, CblasNoTrans, 
-        //     row, column, 
-        //     1.0, 
-        //     net->weights[l], column, 
-        //     input, 1, 
-        //     0.0, 
-        //     output, 1);
-
         cblas_dgemv(CblasRowMajor, CblasNoTrans,
                     row, column,
                     1.0,
@@ -230,12 +259,6 @@ double** NN_ForwardPropagationsWithActivations(const uint8_t *data, const Neural
                     input, 1,
                     0.0,
                     output, 1);
-
-        // printf("\n===================\n");        
-        // printf("output neurons layer %ld\n", l);
-        // print_vector(output, row);
-        
-        
 
         // Сохраняем активации слоя
         activations[l+1] = (double*)malloc(row * sizeof(double));
@@ -257,10 +280,6 @@ double** NN_ForwardPropagationsWithActivations(const uint8_t *data, const Neural
                 output[i] = NN_Activation_Relu(output[i]);
             }
         }
-        // printf("\n===================\n");
-        // printf("output neurons layer %ld\n", l);
-        // print_vector(output, row);
-        // printf("\n===================\n");
         
         if (l == net->num_layer-1){
             if (NN_Activation_Softmax(output, row)){
@@ -275,9 +294,6 @@ double** NN_ForwardPropagationsWithActivations(const uint8_t *data, const Neural
         }
         memcpy(activations[l+1], output, row * sizeof(double));
 
-        //cblas_ddot(row, net->biases[l], 1, output, 1);
-        
-
         free(input);
         input = output;
         output = NULL;
@@ -286,6 +302,15 @@ double** NN_ForwardPropagationsWithActivations(const uint8_t *data, const Neural
     return activations;
 }
 
+/**
+ * @brief Алгоритм прямого распростронения нейронной сети
+ * @param data вектор входное слоя
+ * @param net структура нейронной сети
+ * @details Выполняеться матричное умножение входного слоя на веса
+ *          И прибавляеться вектор смещения
+ *          в многойслойной сети резулят матричных операций переходит на внутренние слои
+ *          для ускорения матричных вычеслений используеться функции cblas
+ */
 double* NN_ForwardPropagations (const uint8_t *data, const NeuralNetwork *net){
     if (!data || !net) return NULL;
 
@@ -307,15 +332,7 @@ double* NN_ForwardPropagations (const uint8_t *data, const NeuralNetwork *net){
             free(input);
             return NULL;
         }
-
-        // dgemv(CblasRowMajor, CblasNoTrans, 
-        //     row, column, 
-        //     1.0, 
-        //     net->weights[l], column, 
-        //     input, 1, 
-        //     0.0, 
-        //     output, 1);
-
+        
         cblas_dgemv(CblasRowMajor, CblasNoTrans,
                     row, column,
                     1.0,
@@ -323,10 +340,6 @@ double* NN_ForwardPropagations (const uint8_t *data, const NeuralNetwork *net){
                     input, 1,
                     0.0,
                     output, 1);
-
-        // printf("\n===================\n");        
-        // printf("output neurons layer %ld\n", l);
-        // print_vector(output, row);
         
         for (size_t i=0; i < row; i++){
             output[i] += net->biases[l][i];
@@ -342,14 +355,7 @@ double* NN_ForwardPropagations (const uint8_t *data, const NeuralNetwork *net){
                 return NULL;
             }
         }
-        // printf("\n===================\n");
-        // printf("output neurons layer %ld\n", l);
-        // print_vector(output, row);
-        // printf("\n===================\n");
         
-        //cblas_ddot(row, net->biases[l], 1, output, 1);
-        
-
         free(input);
         input = output;
         output = NULL;
@@ -357,6 +363,16 @@ double* NN_ForwardPropagations (const uint8_t *data, const NeuralNetwork *net){
     return input;
 }
 
+/**
+ * @brief Кросс энтропическая функция ошибки
+ * @param data массив признаков примера из всего датасета
+ * @param start индекс стартового примера из датасета
+ * @param finish индекс конечного примера из датасета
+ * @param net структура сети
+ * @details на каждом примере из датасета выполняеться прямое распростронение
+ *          и считаеться отрицательный логарифм вероятности правельного класс
+ *          и считаеться средняя ошибка в датасете по интервалу от start до finish
+ */
 double NN_CrossEntropyLoss (DataSet *data, size_t start, size_t finish, NeuralNetwork *net){
     double loss = 0.0;
     size_t num_example = finish - start + 1;
@@ -368,27 +384,10 @@ double NN_CrossEntropyLoss (DataSet *data, size_t start, size_t finish, NeuralNe
             printf("Error: Exit ForwardProp is NULL\n");
             return NAN;
         }
-
-        // printf("Label: %d\n", label);
-        // for (size_t j=0; j < net->layer_size[net->num_layer]; j++) {
-        //     printf("%d) %0.17e\n", j, predictions[j]);
-        // }
-
-        // if (predictions[label] == 0){
-        //     printf("Error: Predictions[label] is 0.0, cant calcus log\n");
-        //     free(predictions);
-        //     return NAN;
-        // }
+        
         // 1e-12 мальенкое смещение если вдруг predictions[label] будет равен 0
         double curr_loss = -log (predictions[label] + 1e-12);
         loss += curr_loss;
-        // printf("==================\n");
-        // printf("Correct class = %d\n", label);
-        // for (size_t j=0; j <10; j++){
-        //         printf("%d) %0.4e\n", j, predictions[j]);    
-        // }
-        // printf("Data %d: Loss = %0.17e\n", i, curr_loss);
-        //printf("\n%0.17e", curr_loss);
         
         free(predictions);
     }
@@ -396,6 +395,13 @@ double NN_CrossEntropyLoss (DataSet *data, size_t start, size_t finish, NeuralNe
     return loss/num_example;
 }
 
+
+
+/**
+ * @brief Функция класификации картинки по признакам
+ * @param feature вектор признаков картинки (цвет пикселей)
+ * @param net структура нейронной сети
+*/
 uint8_t NN_ClassDefinitions (uint8_t *feature, NeuralNetwork *net){
     if (!feature || !net) {
         fprintf(stderr, "NN_ClassDefinitions: Invalid arguments\n");
@@ -410,19 +416,18 @@ uint8_t NN_ClassDefinitions (uint8_t *feature, NeuralNetwork *net){
 
     uint8_t max_idx = 0;
     double max_val = predictions[0];
-    //printf("Class 0 = %lf\n", predictions[0]);
     for (size_t i=1; i < net->layer_size[net->num_layer]; i++){
         if (max_val < predictions[i]){
             max_val = predictions[i];
             max_idx = i;
         }
-        //printf("Class %d = %lf\n", i, predictions[i]);
     }
 
     free(predictions);
     return max_idx;
 }
 
+// Процент правильных ответов сети по датасету
 void NN_Accuracy (DataSet *data, NeuralNetwork *net){
     size_t correct = 0;
     size_t total = 0;
@@ -433,16 +438,24 @@ void NN_Accuracy (DataSet *data, NeuralNetwork *net){
         uint8_t predict_class = NN_ClassDefinitions(feature, net);
         if (predict_class == label) correct++;
         total++;
-        // printf("==============\n");
-        // printf ("Correct class = %d, Predict clas = %d\n", label, predict_class);
         printf("All correct = %d, total = %d, Current accuracy: %.2lf\r",correct, total, (double)correct/total);   
-        //printf("Loss MSE = %lf\n", NN_MSE_Loss (&train, i, i, net));
     }
     printf("\n");
 }
 
-void NN_BackPropagations_Worked (DataSet *data, size_t start, size_t finish, NeuralNetwork *net);
-
+/**
+ * @brief Выполняет обратное распространение ошибки на участке датасета
+ * 
+ * @param data Массив обучающих примеров (датасет)
+ * @param start Индекс первого примера в минибатче
+ * @param finish Индекс последнего примера (не включая) в минибатче
+ * @param net Структура нейронной сети, содержащая веса, смещения и размеры слоев
+ * 
+ * @details Для каждого примера в указанном диапазоне выполняется прямое распространение (forward pass),
+ * вычисляется градиент ошибки с использованием кросс-энтропии и обратного распространения (backpropagation).
+ * Градиенты по весам и смещениям усредняются по батчу и применяются с коэффициентом обучения LEARNING_RATE.
+ * Используется метод стохастического градиентного спуска (SGD).
+ */
 void NN_BackPropagations (DataSet *data, size_t start, size_t finish, NeuralNetwork *net){
     clock_t time_start = clock();
 
@@ -599,6 +612,7 @@ void NN_BackPropagations (DataSet *data, size_t start, size_t finish, NeuralNetw
     printf("\n");
 }
 
+// сохранение полей структуры net в бинарный файл
 int SaveNetworkToBinaryFile(const NeuralNetwork *net, const char *filename) {
     if (!net || !filename) {
         fprintf(stderr, "SaveNetworkToBinaryFile: Invalid arguments\n");
@@ -646,7 +660,7 @@ int SaveNetworkToBinaryFile(const NeuralNetwork *net, const char *filename) {
     fclose(file);
     return 0;
 }
-
+// загрузка полей структуры net из бинарного файла
 NeuralNetwork* LoadNetworkFromBinaryFile(const char *filename) {
     if (!filename) {
         fprintf(stderr, "LoadNetworkFromBinaryFile: Invalid arguments\n");
@@ -785,41 +799,13 @@ NeuralNetwork* LoadNetworkFromBinaryFile(const char *filename) {
     return net;
 }
 
-void NN_Print(NeuralNetwork *net) {
-    if (!net) {
-        fprintf(stderr, "NN_Print: NeuralNetwork pointer is NULL.\n");
-        return;
-    }
 
-    printf("=== Neural Network Structure ===\n");
-    printf("Total layers (excluding input): %zu\n", net->num_layer);
-    printf("Layer sizes: ");
-    for (size_t i = 0; i <= net->num_layer; i++) {
-        printf("%zu ", net->layer_size[i]);
-    }
-    printf("\n");
 
-    for (size_t l = 0; l < net->num_layer; l++) {
-        size_t in = net->layer_size[l];
-        size_t out = net->layer_size[l + 1];
-        printf("\n--- Layer %zu ---\n", l);
-        printf("Weights [%zux%zu]:\n", out, in);
-        for (size_t i = 0; i < out; i++) {
-            for (size_t j = 0; j < in; j++) {
-                printf("%8.4f ", net->weights[l][i * in + j]);
-            }
-            printf("\n");
-        }
 
-        printf("Biases [%zu]:\n", out);
-        for (size_t i = 0; i < out; i++) {
-            printf("%8.4f ", net->biases[l][i]);
-        }
-        printf("\n");
-    }
-    printf("===============================\n");
-}
-
+/**
+ * @brief Очистка струтуры NeuralNetwork 
+ * @param net структура сети net
+*/
 void NN_Destroy (NeuralNetwork *net){
     if (!net) return;
     for (size_t l=0; l<net->num_layer; l++){
